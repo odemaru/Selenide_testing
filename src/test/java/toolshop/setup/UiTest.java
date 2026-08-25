@@ -5,6 +5,7 @@ import com.codeborne.selenide.WebDriverRunner;
 import com.codeborne.selenide.logevents.SelenideLogger;
 import io.qameta.allure.selenide.AllureSelenide;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.firefox.FirefoxOptions;
 
@@ -53,6 +54,20 @@ public abstract class UiTest {
         }
         chrome.addArguments("--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu");
         return chrome;
+    }
+
+    /**
+     * Состояние чистится и перед тестом, а не только после него.
+     *
+     * Уборка после теста не выполняется, если тест упал так, что браузер
+     * остался на чужой странице, — и следующий тест на том же потоке
+     * получает чужую корзину. Ловилось в CI: значок корзины показывал два
+     * товара там, где тест добавил один. Браузер к этому моменту уже открыт
+     * на странице магазина, поэтому лишней загрузки уборка не стоит.
+     */
+    @BeforeEach
+    void clearStateBeforeTest() {
+        clearBrowserState();
     }
 
     @AfterEach

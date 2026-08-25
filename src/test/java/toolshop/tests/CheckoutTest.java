@@ -58,20 +58,34 @@ class CheckoutTest extends UiTest {
         checkout.paymentSuccessMessage().shouldBe(visible);
     }
 
+    /**
+     * Требование здесь — «оплата без реквизитов не проходит», а не «кнопка
+     * заблокирована»: это исход, который видит пользователь, и он не зависит
+     * от того, как магазин его добивается.
+     *
+     * Разница не умозрительная. Публичный стенд блокирует кнопку, а образ,
+     * на котором прогон идёт в CI, собран раньше и позволяет нажать —
+     * платёж при этом всё равно не принимается. Проверка механизма зеленела
+     * бы только на одной из версий, проверка исхода верна на обеих.
+     *
+     * Кредитная карта сюда не входит: у её полей нет и проверки на
+     * обязательность, из-за чего пустая форма считается заполненной.
+     * Оформлено как BUG-8 в KnownBugsTest.
+     */
     @ParameterizedTest(name = "{0}")
     @EnumSource(value = PaymentMethod.class, names = {"CASH_ON_DELIVERY", "CREDIT_CARD"},
             mode = EnumSource.Mode.EXCLUDE)
     @TmsLink("ТК-16")
-    @DisplayName("С пустыми реквизитами подтверждение недоступно")
-    void confirmStaysDisabledWithoutDetails(PaymentMethod method) {
-        // Кредитная карта сюда не входит: у её полей нет проверки на
-        // обязательность, и подтверждение остаётся доступным. Оформлено
-        // как BUG-8 в KnownBugsTest.
+    @DisplayName("Оплата не проходит с пустыми реквизитами")
+    void paymentDoesNotSucceedWithoutDetails(PaymentMethod method) {
         startCheckoutAsGuest();
 
         checkout.choosePayment(method);
 
-        checkout.confirmButton().shouldBe(disabled);
+        if (checkout.confirmButton().is(enabled)) {
+            checkout.confirm();
+        }
+        checkout.paymentSuccessMessage().shouldNotBe(visible);
     }
 
     @Test

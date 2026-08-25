@@ -1,14 +1,17 @@
 package toolshop.pages;
 
 import com.codeborne.selenide.ElementsCollection;
+import com.codeborne.selenide.Selenide;
 import com.codeborne.selenide.SelenideElement;
 import io.qameta.allure.Step;
 import toolshop.api.model.Address;
 import toolshop.data.PaymentMethod;
 
+import static com.codeborne.selenide.Condition.attributeMatching;
 import static com.codeborne.selenide.Condition.enabled;
 import static com.codeborne.selenide.Condition.exactText;
 import static com.codeborne.selenide.Condition.text;
+import static com.codeborne.selenide.Condition.value;
 import static com.codeborne.selenide.Condition.visible;
 import static com.codeborne.selenide.Selenide.$$;
 import static com.codeborne.selenide.Selenide.open;
@@ -56,13 +59,31 @@ public class CheckoutPage {
     }
 
     /**
-     * Магазин пересчитывает строку по событию input, которое Selenide шлёт
-     * при вводе. Нажатие Enter сверх этого сбрасывало правку обратно
-     * к прежнему количеству, поэтому его здесь нет.
+     * Количество задаётся установкой значения с событием input, а не набором
+     * с клавиатуры.
+     *
+     * Поле объявлено как input type=number, и до Angular нажатия не долетают:
+     * в CI после setValue поле оставалось ng-pristine со старым значением,
+     * то есть приложение ввода не заметило вовсе, хотя фокус получало.
+     * Известная беда числовых полей в WebDriver; сам Selenide в режиме
+     * fastSetValue поступает так же. Событие input магазин слушает —
+     * проверено вручную, строка пересчитывается именно по нему.
+     *
+     * Принятое значение проверяется здесь же, чтобы тест не пошёл дальше
+     * с молча потерянным вводом.
      */
     @Step("Задать количество «{product}»: {quantity}")
     public CheckoutPage setQuantity(String product, String quantity) {
-        quantityField(product).setValue(quantity);
+        SelenideElement field = quantityField(product);
+        field.shouldHave(attributeMatching("value", "\\d+"));
+        Selenide.executeJavaScript(
+                "const field = arguments[0];"
+                        + "Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')"
+                        + "  .set.call(field, arguments[1]);"
+                        + "field.dispatchEvent(new Event('input', {bubbles: true}));"
+                        + "field.dispatchEvent(new Event('change', {bubbles: true}));",
+                field, quantity);
+        field.shouldHave(value(quantity));
         return this;
     }
 
@@ -102,19 +123,38 @@ public class CheckoutPage {
 
     // --- шаг 3, адрес -------------------------------------------------------
 
+    /**
+     * Каждое поле проверяется на принятое значение до перехода дальше.
+     *
+     * Ввод в этом приложении иногда не долетает до Angular — то же, что
+     * с полем количества. Без проверки форма остаётся невалидной, кнопка
+     * перехода не включается, и тест падает уже на шаге оплаты, где причину
+     * не видно. С проверкой падение приходится на конкретное поле.
+     */
     @Step("Заполнить адрес доставки")
     public CheckoutPage fillBilling(Address address) {
-        $test("street").shouldBe(visible).setValue(address.street());
-        $test("house_number").setValue(address.houseNumber());
-        $test("postal_code").setValue(address.postalCode());
-        $test("city").setValue(address.city());
-        $test("state").setValue(address.state());
+        $test("street").shouldBe(visible);
+        fill("street", address.street());
+        fill("house_number", address.houseNumber());
+        fill("postal_code", address.postalCode());
+        fill("city", address.city());
+        fill("state", address.state());
         $test("country").selectOptionByValue(address.country());
-        // Кнопка перехода включается только после того, как Angular признает
-        // форму валидной. Клик раньше этого момента проходит вхолостую,
-        // и шаг оплаты не открывается.
+
+        // Кнопка включается только после того, как Angular признает форму
+        // валидной; клик раньше проходит вхолостую и шаг оплаты не открывается.
         $test("proceed-3").shouldBe(enabled).click();
+        $test("payment-method").shouldBe(visible);
         return this;
+    }
+
+    private void fill(String field, String text) {
+        SelenideElement input = $test(field);
+        input.setValue(text);
+        if (!text.equals(input.getValue())) {
+            input.setValue(text);
+        }
+        input.shouldHave(value(text));
     }
 
     // --- шаг 4, оплата ------------------------------------------------------
