@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>io.github.odemaru</groupId>
+    <artifactId>toolshop-ui-tests</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+
+    <properties>
+        <maven.compiler.release>21</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <selenide.version>7.9.3</selenide.version>
+        <junit.version>5.14.4</junit.version>
+        <allure.version>2.35.4</allure.version>
+        <assertj.version>3.27.7</assertj.version>
+        <jackson.version>2.18.4</jackson.version>
+        <owner.version>1.0.12</owner.version>
+        <slf4j.version>2.0.18</slf4j.version>
+        <aspectj.version>1.9.24</aspectj.version>
+
+        <!-- Параметры прогона. Переопределяются из командной строки:
+             ./mvnw test -Dheadless=false -Dthreads=4
+
+             Потоков два, а не по числу ядер: каждый поток держит свой Chrome,
+             и на четырёх экземплярах машина перестаёт успевать отрисовывать
+             Angular в отведённый таймаут. Упирается не стенд — он отвечает
+             за доли секунды, — а процессор. -->
+        <browser>chrome</browser>
+        <headless>true</headless>
+        <threads>2</threads>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- Surefire приносит свой junit-platform-launcher, и он оказывается
+                 старше движка из junit-jupiter. BOM выравнивает всю связку,
+                 иначе тесты не находятся вообще. -->
+            <dependency>
+                <groupId>org.junit</groupId>
+                <artifactId>junit-bom</artifactId>
+                <version>${junit.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.codeborne</groupId>
+            <artifactId>selenide</artifactId>
+            <version>${selenide.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-launcher</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Запускает тесты внутри теста: нужен, чтобы проверить собственное
+             расширение @KnownBug, не полагаясь на то, что оно работает. -->
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-testkit</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <version>${assertj.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>io.qameta.allure</groupId>
+            <artifactId>allure-jupiter</artifactId>
+            <version>${allure.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>io.qameta.allure</groupId>
+            <artifactId>allure-selenide</artifactId>
+            <version>${allure.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Разбор ответов API, через который тесты готовят состояние.
+             Сам HTTP-вызов делает java.net.http.HttpClient из JDK. -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.aeonbits.owner</groupId>
+            <artifactId>owner</artifactId>
+            <version>${owner.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>${slf4j.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.15.0</version>
+                <configuration>
+                    <parameters>true</parameters>
+                </configuration>
+            </plugin>
+
+            <!-- Собирает и показывает отчёт: ./mvnw allure:serve -->
+            <plugin>
+                <groupId>io.qameta.allure</groupId>
+                <artifactId>allure-maven</artifactId>
+                <version>3.0.3</version>
+                <configuration>
+                    <reportVersion>2.35.1</reportVersion>
+                    <resultsDirectory>allure-results</resultsDirectory>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.6</version>
+                <configuration>
+                    <!-- Allure собирает шаги через AspectJ: без weaver в отчёте
+                         не будет ни @Step, ни вложений. -->
+                    <argLine>
+                        -javaagent:"${settings.localRepository}/org/aspectj/aspectjweaver/${aspectj.version}/aspectjweaver-${aspectj.version}.jar"
+                    </argLine>
+                    <systemPropertyVariables>
+                        <browser>${browser}</browser>
+                        <headless>${headless}</headless>
+                        <junit.jupiter.execution.parallel.config.fixed.parallelism>${threads}</junit.jupiter.execution.parallel.config.fixed.parallelism>
+                        <junit.jupiter.execution.parallel.config.fixed.max-pool-size>${threads}</junit.jupiter.execution.parallel.config.fixed.max-pool-size>
+                    </systemPropertyVariables>
+                    <!-- Падение UI-теста — обычное дело при недоступности стенда,
+                         но прогон должен дойти до конца и собрать отчёт целиком. -->
+                    <testFailureIgnore>false</testFailureIgnore>
+                </configuration>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.aspectj</groupId>
+                        <artifactId>aspectjweaver</artifactId>
+                        <version>${aspectj.version}</version>
+                    </dependency>
+                </dependencies>
+            </plugin>
+        </plugins>
+    </build>
+</project>
