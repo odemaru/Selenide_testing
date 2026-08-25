@@ -1,5 +1,8 @@
 package toolshop.setup;
 
+import com.codeborne.selenide.Condition;
+import com.codeborne.selenide.ex.ElementNotFound;
+import com.codeborne.selenide.impl.Alias;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.platform.testkit.engine.EngineTestKit;
@@ -43,6 +46,16 @@ class KnownBugExtensionTest {
                         message(text -> text.contains("BUG-42") && text.contains("больше не воспроизводится")))));
     }
 
+    @Test
+    @DisplayName("Не открывшаяся страница не засчитывается за дефект")
+    void brokenEnvironmentIsNotMistakenForBug() {
+        EngineTestKit.engine("junit-jupiter")
+                .selectors(selectClass(PageNeverOpened.class))
+                .execute()
+                .testEvents()
+                .assertStatistics(stats -> stats.succeeded(0).failed(1));
+    }
+
     /**
      * Образцы для запуска изнутри. Имена классов не оканчиваются на Test,
      * поэтому обычный прогон их не подхватывает.
@@ -61,6 +74,19 @@ class KnownBugExtensionTest {
         @Test
         @KnownBug("BUG-42")
         void checkPasses() {
+        }
+    }
+
+    /**
+     * Страница не открылась: элемента нет вовсе. Такое падение ничего
+     * не говорит о дефекте, и засчитывать его нельзя.
+     */
+    static class PageNeverOpened {
+
+        @Test
+        @KnownBug("BUG-43")
+        void checkNeverRan() {
+            throw new ElementNotFound(Alias.NONE, "[data-test=register-submit]", Condition.visible);
         }
     }
 }

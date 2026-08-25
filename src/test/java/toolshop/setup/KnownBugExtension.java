@@ -1,9 +1,11 @@
 package toolshop.setup;
 
+import com.codeborne.selenide.ex.ElementNotFound;
 import org.junit.jupiter.api.extension.AfterTestExecutionCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.TestExecutionExceptionHandler;
 import org.opentest4j.TestAbortedException;
+import org.openqa.selenium.WebDriverException;
 
 import java.util.Optional;
 
@@ -31,7 +33,29 @@ public class KnownBugExtension implements TestExecutionExceptionHandler, AfterTe
         if (throwable instanceof TestAbortedException) {
             throw throwable;
         }
+        if (isBrokenEnvironment(throwable)) {
+            throw throwable;
+        }
         context.getStore(NAMESPACE).put(REPRODUCED, throwable);
+    }
+
+    /**
+     * Отличает «дефект на месте» от «страница не открылась».
+     *
+     * Без этой проверки механизм зачитывает себе всё подряд. Поймано на живом
+     * примере: в CI страницы магазина перехватывал Cloudflare, до приложения
+     * тесты не доходили — и все восемь проверок дефектов позеленели, хотя
+     * ничего не проверили.
+     *
+     * Разделение опирается на то, какое исключение бросает Selenide.
+     * ElementNotFound значит, что элемента нет вовсе, то есть открылось не то,
+     * что ожидалось: каждый тест здесь начинается с открытия страницы, а оно
+     * само проверяет видимость якорного элемента. А ElementShould возникает,
+     * когда элемент на месте, но ведёт себя не так, — вот это и есть дефект.
+     */
+    private boolean isBrokenEnvironment(Throwable throwable) {
+        return throwable instanceof ElementNotFound
+                || throwable instanceof WebDriverException;
     }
 
     @Override

@@ -6,32 +6,99 @@ on:
   pull_request:
   workflow_dispatch:
   schedule:
-    # Еженедельный прогон. Тесты идут по внешнему стенду, который меняется
-    # без предупреждения: так о поломке станет известно раньше, чем от него
-    # что-то понадобится. Заодно @KnownBug сообщит об исправленном дефекте.
+    # Еженедельный прогон: @KnownBug сообщит, если какой-то из дефектов
+    # починили в новой версии образов магазина.
     - cron: "0 6 * * 1"
 
 jobs:
   ui:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
           cache: maven
 
-      # Драйвер Selenium Manager подбирает сам, но браузер должен быть в системе.
-      - uses: browser-actions/setup-chrome@v1
+      # Драйвер Selenium Manager подбирает сам, браузер должен быть в системе.
+      - uses: browser-actions/setup-chrome@v2
         with:
           chrome-version: stable
 
+      # Тесты идут по стенду, поднятому здесь же, а не по публичному демо.
+      # Публичное демо закрыто Cloudflare, и с адресов GitHub оно отдаёт
+      # страницу проверки «Performing security verification» вместо магазина:
+      # браузер до приложения не доходит. Локальный стенд заодно избавляет
+      # от чужих данных в каталоге и от пересоздания базы посреди прогона.
+      - name: Забрать магазин
+        run: git clone --depth 1 https://github.com/testsmith-io/practice-software-testing.git /tmp/shop
+
+      - name: Поднять стенд
+        working-directory: /tmp/shop
+        run: |
+          cp "$GITHUB_WORKSPACE/ci/stand.override.yml" .
+          docker compose -f docker-compose.prod.yml -f stand.override.yml up -d --build
+
+      - name: Дождаться API
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:8091/status > /dev/null; then
+              echo "API поднялся за $((i * 5)) с"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "API не поднялся"
+          exit 1
+
+      # Образы поднимаются с пустой базой: /status отвечает, а /products
+      # падает с 500. Миграцию и наполнение авторы магазина выполняют
+      # отдельной командой, она же описана в их README.
+      - name: Наполнить базу
+        working-directory: /tmp/shop
+        run: |
+          for i in $(seq 1 12); do
+            if docker compose -f docker-compose.prod.yml -f stand.override.yml \
+                 exec -T laravel-api php artisan migrate:fresh --seed --force; then
+              exit 0
+            fi
+            echo "база ещё не готова, попытка $i"
+            sleep 10
+          done
+          echo "не удалось наполнить базу"
+          exit 1
+
+      - name: Дождаться витрины
+        run: |
+          for i in $(seq 1 90); do
+            if curl -sf http://localhost:4200 > /dev/null; then
+              echo "Витрина поднялась за $((i * 5)) с"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Витрина не поднялась"
+          exit 1
+
+      # Пустой каталог уронил бы половину тестов с невнятной причиной,
+      # поэтому наличие товаров проверяется до прогона.
+      - name: Проверить, что каталог наполнен
+        run: |
+          count=$(curl -sf http://localhost:8091/products | python3 -c "import sys,json; print(json.load(sys.stdin).get('total', 0))")
+          echo "товаров в каталоге: $count"
+          test "$count" -gt 0
+
       - name: Прогнать тесты
-        run: ./mvnw -B test -Dheadless=true -Dthreads=2
+        run: >
+          ./mvnw -B test
+          -Dheadless=true
+          -Dthreads=2
+          -Dbase.url=http://localhost:4200
+          -Dapi.url=http://localhost:8091
 
       - name: Сохранить результаты прогона
         if: always()
@@ -50,3 +117,8 @@ jobs:
           name: selenide-reports
           path: target/selenide-reports
           retention-days: 14
+
+      - name: Логи стенда
+        if: failure()
+        working-directory: /tmp/shop
+        run: docker compose -f docker-compose.prod.yml -f stand.override.yml logs --tail 60
